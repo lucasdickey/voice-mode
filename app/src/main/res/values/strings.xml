@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voice Mode</string>
+
+    <!-- Accessibility Service -->
+    <string name="accessibility_service_description">Voice Mode provides system-wide voice dictation with AI-enhanced transcription. Long-press in any text field to activate voice input. Your audio is processed to remove filler words, fix grammar, and improve clarity.</string>
+    <string name="accessibility_service_label">Voice Mode Dictation</string>
+
+    <!-- Permissions -->
+    <string name="permission_accessibility_title">Enable Accessibility Service</string>
+    <string name="permission_accessibility_message">Voice Mode needs accessibility access to detect text fields and insert transcribed text across all apps.</string>
+    <string name="permission_microphone_title">Microphone Access</string>
+    <string name="permission_microphone_message">Voice Mode needs microphone access to record your voice for transcription.</string>
+    <string name="permission_overlay_title">Display Over Other Apps</string>
+    <string name="permission_overlay_message">Voice Mode needs to display the recording interface when you activate dictation.</string>
+
+    <!-- Main Screen -->
+    <string name="main_title">Voice Mode</string>
+    <string name="main_subtitle">AI-Powered Voice Dictation</string>
+    <string name="setup_required">Setup Required</string>
+    <string name="setup_complete">All Set!</string>
+    <string name="service_status_enabled">Service Enabled</string>
+    <string name="service_status_disabled">Service Disabled</string>
+
+    <!-- Buttons -->
+    <string name="btn_enable_service">Enable Accessibility Service</string>
+    <string name="btn_grant_microphone">Grant Microphone Permission</string>
+    <string name="btn_grant_overlay">Grant Overlay Permission</string>
+    <string name="btn_open_settings">Open Settings</string>
+    <string name="btn_test_dictation">Test Dictation</string>
+
+    <!-- Status Messages -->
+    <string name="status_listening">Listening…</string>
+    <string name="status_processing">Processing…</string>
+    <string name="status_inserting">Inserting text…</string>
+    <string name="status_complete">Complete</string>
+    <string name="status_error">Error occurred</string>
+
+    <!-- Overlay -->
+    <string name="overlay_hint">Speak now</string>
+    <string name="overlay_release_hint">Release when done</string>
+    <string name="overlay_cancel">Cancel</string>
+
+    <!-- Errors -->
+    <string name="error_no_text_field">No text field focused</string>
+    <string name="error_recording_failed">Failed to start recording</string>
+    <string name="error_transcription_failed">Transcription failed</string>
+    <string name="error_permission_denied">Permission denied</string>
+</resources>
