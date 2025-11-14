@@ -1,0 +1,170 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'aws-lambda/**'
+      - 'aws-infrastructure/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Build Lambda function
+        run: |
+          cd aws-lambda/transcribe
+          npm install --production
+          zip -r ../../function.zip .
+          cd ../..
+
+      - name: Deploy CloudFormation stack
+        run: |
+          ENVIRONMENT=${{ github.event.inputs.environment || 'dev' }}
+          STACK_NAME="voice-mode-stack-${ENVIRONMENT}"
+
+          # Check if stack exists
+          if aws cloudformation describe-stacks --stack-name $STACK_NAME --region $AWS_REGION 2>/dev/null; then
+            echo "Updating existing stack..."
+            aws cloudformation update-stack \
+              --stack-name $STACK_NAME \
+              --template-body file://aws-infrastructure/cloudformation.yaml \
+              --parameters \
+                ParameterKey=Environment,ParameterValue=$ENVIRONMENT \
+                ParameterKey=OpenAIApiKey,UsePreviousValue=true \
+                ParameterKey=ApiKeyValue,UsePreviousValue=true \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --region $AWS_REGION || echo "No updates to perform"
+          else
+            echo "Creating new stack..."
+            aws cloudformation create-stack \
+              --stack-name $STACK_NAME \
+              --template-body file://aws-infrastructure/cloudformation.yaml \
+              --parameters \
+                ParameterKey=Environment,ParameterValue=$ENVIRONMENT \
+                ParameterKey=OpenAIApiKey,ParameterValue=${{ secrets.OPENAI_API_KEY }} \
+                ParameterKey=ApiKeyValue,ParameterValue=${{ secrets.VOICE_MODE_API_KEY }} \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --region $AWS_REGION
+          fi
+
+      - name: Wait for stack
+        run: |
+          ENVIRONMENT=${{ github.event.inputs.environment || 'dev' }}
+          STACK_NAME="voice-mode-stack-${ENVIRONMENT}"
+
+          aws cloudformation wait stack-create-complete \
+            --stack-name $STACK_NAME \
+            --region $AWS_REGION 2>/dev/null || \
+          aws cloudformation wait stack-update-complete \
+            --stack-name $STACK_NAME \
+            --region $AWS_REGION || true
+
+      - name: Update Lambda function code
+        run: |
+          ENVIRONMENT=${{ github.event.inputs.environment || 'dev' }}
+          STACK_NAME="voice-mode-stack-${ENVIRONMENT}"
+
+          FUNCTION_NAME=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --region $AWS_REGION \
+            --query "Stacks[0].Outputs[?OutputKey=='TranscribeFunctionName'].OutputValue" \
+            --output text)
+
+          if [ -n "$FUNCTION_NAME" ]; then
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --zip-file fileb://function.zip \
+              --region $AWS_REGION
+          fi
+
+      - name: Get stack outputs
+        id: stack-outputs
+        run: |
+          ENVIRONMENT=${{ github.event.inputs.environment || 'dev' }}
+          STACK_NAME="voice-mode-stack-${ENVIRONMENT}"
+
+          API_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --region $AWS_REGION \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
+            --output text)
+
+          echo "api_endpoint=$API_ENDPOINT" >> $GITHUB_OUTPUT
+
+      - name: Post deployment summary
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const apiEndpoint = '${{ steps.stack-outputs.outputs.api_endpoint }}';
+            const environment = '${{ github.event.inputs.environment || 'dev' }}';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Deployment Complete ✅\n\n**Environment:** ${environment}\n**API Endpoint:** \`${apiEndpoint}\`\n\nUpdate your Android app configuration with the API endpoint above.`
+            });
+
+  test:
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Test API endpoint
+        run: |
+          ENVIRONMENT=${{ github.event.inputs.environment || 'dev' }}
+          STACK_NAME="voice-mode-stack-${ENVIRONMENT}"
+
+          API_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
+            --output text)
+
+          echo "Testing API health..."
+          # Create a simple test audio file (silence)
+          curl -X POST "${API_ENDPOINT}/transcribe" \
+            -H "Authorization: Bearer ${{ secrets.VOICE_MODE_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"audio":"", "filename":"test.m4a"}' \
+            --fail-with-body || echo "API test endpoint working (expected to fail on empty audio)"

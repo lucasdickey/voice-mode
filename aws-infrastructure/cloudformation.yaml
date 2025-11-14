@@ -1,0 +1,329 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Voice Mode - Complete AWS Infrastructure with Lambda, API Gateway, DynamoDB, S3'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment
+
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAI API key for Whisper
+
+  ApiKeyValue:
+    Type: String
+    NoEcho: true
+    Description: API key for mobile app authentication
+    MinLength: 32
+
+Resources:
+  # ============= S3 BUCKET =============
+  VoiceModeAudioBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'voice-mode-audio-${AWS::AccountId}-${Environment}'
+      VersioningConfiguration:
+        Status: Enabled
+      ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldAudio
+            Status: Enabled
+            ExpirationInDays: 90
+            Prefix: 'audio/'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: VoiceMode
+
+  # ============= DYNAMODB TABLE =============
+  TranscriptionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'voice-mode-transcriptions-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: transcriptionId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: transcriptionId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserIdTimestampIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: VoiceMode
+
+  # ============= IAM ROLE FOR LAMBDA =============
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt TranscriptionsTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource: !Sub '${TranscriptionsTable.Arn}/index/UserIdTimestampIndex'
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource: !Sub '${VoiceModeAudioBucket.Arn}/*'
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  # ============= LAMBDA FUNCTION =============
+  TranscribeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBWrite
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt TranscriptionsTable.Arn
+        - PolicyName: S3Write
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub '${VoiceModeAudioBucket.Arn}/*'
+
+  TranscribeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'voice-mode-transcribe-${Environment}'
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 300
+      MemorySize: 1024
+      Role: !GetAtt TranscribeFunctionRole.Arn
+      Environment:
+        Variables:
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          DYNAMODB_TABLE: !Ref TranscriptionsTable
+          S3_BUCKET: !Ref VoiceModeAudioBucket
+          ENVIRONMENT: !Ref Environment
+      Code:
+        ZipFile: |
+          // Placeholder - will be replaced with actual code during deployment
+          exports.handler = async (event) => {
+            return {
+              statusCode: 200,
+              body: JSON.stringify({ message: 'Deploy Lambda code here' })
+            };
+          };
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ============= API GATEWAY =============
+  VoiceModeApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub 'voice-mode-api-${Environment}'
+      Description: Voice Mode API Gateway
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Tags:
+        Environment: !Ref Environment
+
+  ApiAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: ApiKeyAuthorizer
+      Type: TOKEN
+      IdentitySource: method.request.header.Authorization
+      AuthorizerUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerFunction.Arn}/invocations'
+
+  AuthorizerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'voice-mode-authorizer-${Environment}'
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          API_KEY: !Ref ApiKeyValue
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            const token = event.authorizationToken;
+            const apiKey = process.env.API_KEY;
+
+            if (token === `Bearer ${apiKey}`) {
+              return {
+                principalId: 'user',
+                policyDocument: {
+                  Version: '2012-10-17',
+                  Statement: [{
+                    Action: 'execute-api:Invoke',
+                    Effect: 'Allow',
+                    Resource: event.methodArn
+                  }]
+                }
+              };
+            }
+
+            throw new Error('Unauthorized');
+          };
+
+  TranscribeResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref VoiceModeApi
+      ParentId: !GetAtt VoiceModeApi.RootResourceId
+      PathPart: transcribe
+
+  TranscribeMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref VoiceModeApi
+      ResourceId: !Ref TranscribeResource
+      HttpMethod: POST
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref ApiAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TranscribeFunction.Arn}/invocations'
+
+  TranscribeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TranscribeFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${VoiceModeApi}/*/*'
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: TranscribeMethod
+    Properties:
+      RestApiId: !Ref VoiceModeApi
+      StageName: !Ref Environment
+
+  # ============= CLOUDWATCH LOG GROUP =============
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/voice-mode-${Environment}'
+      RetentionInDays: 30
+
+  # ============= CLOUDWATCH ALARMS =============
+  TranscribeFunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'voice-mode-transcribe-errors-${Environment}'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref TranscribeFunction
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${VoiceModeApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub 'VoiceModeApiEndpoint-${Environment}'
+
+  S3BucketName:
+    Description: S3 bucket for audio storage
+    Value: !Ref VoiceModeAudioBucket
+    Export:
+      Name: !Sub 'VoiceModeAudioBucket-${Environment}'
+
+  DynamoDBTableName:
+    Description: DynamoDB table for transcriptions
+    Value: !Ref TranscriptionsTable
+    Export:
+      Name: !Sub 'VoiceModeTranscriptionsTable-${Environment}'
+
+  TranscribeFunctionName:
+    Description: Lambda function name
+    Value: !Ref TranscribeFunction
+    Export:
+      Name: !Sub 'VoiceModeTranscribeFunction-${Environment}'
