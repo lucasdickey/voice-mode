@@ -49,6 +49,26 @@ dependencies {
     implementation 'androidx.compose.ui:ui-graphics'
     implementation 'androidx.compose.ui:ui-tooling-preview'
     implementation 'androidx.compose.material3:material3'
+
+    // Note: AWS Bedrock integration is handled via backend server
+    // Direct Bedrock calls from Android not needed since we use HTTP to backend
+
+    // Audio recording
+    implementation 'androidx.media:media:1.6.0'
+
+    // HTTP client for backend communication
+    implementation 'com.squareup.okhttp3:okhttp:4.11.0'
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+    // Permissions handling
+    implementation 'androidx.activity:activity-ktx:1.8.0'
+
+    // Secure storage for API credentials
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+
+    // Note: Google ML Kit Speech Recognition can be added later when needed
+    // It requires proper Google Play Services configuration
+
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation 'org.mockito.kotlin:mockito-kotlin:5.2.1'

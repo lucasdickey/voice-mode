@@ -10,14 +10,17 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
-import androidx.savedstate.SavedStateRegistryController
-import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.voicemode.aws.BedrockService
 import com.voicemode.ui.theme.VoiceModeTheme
+import com.voicemode.viewmodel.VoiceInputViewModel
+import com.voicemode.viewmodel.VoiceInputState
 
 class VoiceModeAccessibilityService : AccessibilityService(), ViewModelStoreOwner {
 
@@ -26,18 +29,23 @@ class VoiceModeAccessibilityService : AccessibilityService(), ViewModelStoreOwne
 
     private val store = ViewModelStore()
     private lateinit var lifecycleOwner: ServiceLifecycleOwner
-    private lateinit var savedStateRegistryController: SavedStateRegistryController
+    private lateinit var voiceInputViewModel: VoiceInputViewModel
 
-    override fun getViewModelStore() = store
+    override val viewModelStore: ViewModelStore get() = store
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         lifecycleOwner = ServiceLifecycleOwner()
-        savedStateRegistryController = SavedStateRegistryController.create(lifecycleOwner)
-        savedStateRegistryController.performRestore(null)
         lifecycleOwner.create()
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+
+        // Initialize Bedrock service and ViewModel
+        val bedrockService = BedrockService(
+            apiEndpoint = getBedrockApiEndpoint(),
+            apiKey = getBedrockApiKey()
+        )
+        voiceInputViewModel = VoiceInputViewModel(this, bedrockService)
     }
 
     private fun showFab() {
@@ -46,14 +54,39 @@ class VoiceModeAccessibilityService : AccessibilityService(), ViewModelStoreOwne
         fabView = ComposeView(this).apply {
             setViewTreeLifecycleOwner(lifecycleOwner)
             setViewTreeViewModelStoreOwner(this@VoiceModeAccessibilityService)
-            setViewTreeSavedStateRegistryOwner(lifecycleOwner)
 
             setContent {
                 VoiceModeTheme {
+                    val uiState = voiceInputViewModel.uiState.collectAsState().value
+
+                    // Handle state changes for transcription
+                    LaunchedEffect(uiState) {
+                        when (uiState) {
+                            is VoiceInputState.Success -> {
+                                Log.d("VoiceMode", "Transcribed: ${uiState.text}")
+                                // TODO: Send transcribed text to active field
+                            }
+                            is VoiceInputState.Error -> {
+                                Log.e("VoiceMode", "Error: ${uiState.message}")
+                            }
+                            else -> {}
+                        }
+                    }
+
                     FloatingActionButton(onClick = {
-                        Log.d("VoiceMode", "FAB Clicked!")
+                        when (uiState) {
+                            VoiceInputState.Idle -> voiceInputViewModel.startRecording()
+                            is VoiceInputState.Success -> voiceInputViewModel.startRecording()
+                            is VoiceInputState.Error -> voiceInputViewModel.startRecording()
+                            VoiceInputState.Recording -> voiceInputViewModel.stopRecording()
+                            VoiceInputState.Processing -> {} // Do nothing while processing
+                        }
                     }) {
-                        Text("🎤")
+                        Text(when (uiState) {
+                            VoiceInputState.Recording -> "⏹️"
+                            VoiceInputState.Processing -> "⏳"
+                            else -> "🎤"
+                        })
                     }
                 }
             }
@@ -119,5 +152,17 @@ class VoiceModeAccessibilityService : AccessibilityService(), ViewModelStoreOwne
         super.onDestroy()
         hideFab()
         lifecycleOwner.destroy()
+    }
+
+    private fun getBedrockApiEndpoint(): String {
+        // TODO: Load from secure configuration
+        // For now, this should be injected or loaded from a config file
+        return "http://your-backend-api.com"
+    }
+
+    private fun getBedrockApiKey(): String {
+        // TODO: Load from secure storage (e.g., EncryptedSharedPreferences)
+        // For now, this should be injected or loaded from a config file
+        return "your-api-key"
     }
 }
