@@ -1,200 +1,76 @@
-# Voice Mode - Complete SaaS/IaaS Configuration Guide
+# Voice Mode - SaaS/IaaS Configuration Guide
 
-Comprehensive, step-by-step guide to configure all external services and AWS infrastructure.
+Quick-start configuration for Voice Mode, assuming you already have AWS infrastructure in place.
 
-**Estimated Time**: 2-3 hours total
+**Estimated Time**: 1-1.5 hours total
+
+**Prerequisites (Already Complete)**:
+- ✅ AWS account with IAM users/groups configured
+- ✅ Bedrock models provisioned (Claude Haiku + Whisper)
+- ✅ RDS databases set up
+- ✅ AWS CLI configured locally
 
 ---
 
-## Phase 1: OpenAI API Setup (15 minutes)
+## Phase 1: Verify Bedrock Models Access (5 minutes)
 
-### Step 1.1: Create OpenAI Account
+Since you already have Bedrock models provisioned, let's verify they're accessible to your IAM user.
 
-1. Go to https://platform.openai.com/signup
-2. Sign up with email or Google account
-3. Complete email verification
-4. Fill in organization info (optional)
-
-### Step 1.2: Add Payment Method
-
-1. Go to https://platform.openai.com/account/billing/overview
-2. Click "Set up paid account"
-3. Enter billing email
-4. Add payment method (credit/debit card)
-5. Click "Set up paid account"
-
-**Important**: OpenAI charges per minute of audio:
-- Whisper API: ~$0.02 per minute
-- 1 hour audio = ~$1.20
-
-### Step 1.3: Create API Key
-
-1. Go to https://platform.openai.com/api-keys
-2. Click "Create new secret key"
-3. Name it: "voice-mode-app"
-4. Click "Create secret key"
-5. **COPY THE KEY** (you only see it once!)
-   - Format: `sk-...` (about 48 characters)
-
-**Save this securely:**
-```
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-### Step 1.4: Check API Quota
-
-1. Go to https://platform.openai.com/account/billing/limits
-2. Verify:
-   - Usage limits are set (optional)
-   - Billing alerts are enabled
-   - Hard limit is high enough
-
-### Step 1.5: Test OpenAI API
+### Step 1.1: Verify Claude Haiku Access
 
 ```bash
-curl https://api.openai.com/v1/models \
-  -H "Authorization: Bearer sk-YOUR_KEY"
+# List available models
+aws bedrock list-foundation-models \
+  --region us-east-1 \
+  --query 'modelSummaries[?contains(modelName, `Haiku`)]'
 
-# Should return list of available models
+# Should show Claude 3.5 Haiku as available
 ```
 
-**Expected Response:**
-```json
-{
-  "object": "list",
-  "data": [
-    {"id": "whisper-1", "object": "model", ...},
-    ...
-  ]
-}
+### Step 1.2: Verify Whisper Access
+
+```bash
+# Check for Whisper model
+aws bedrock list-foundation-models \
+  --region us-east-1 \
+  --query 'modelSummaries[?contains(modelName, `Whisper`) || contains(providerName, `meta`)]'
+
+# Whisper is typically accessed via AWS Transcribe with Bedrock integration
+# Verify IAM user has transcribe permissions
 ```
 
-✅ **OpenAI Setup Complete**
+### Step 1.3: Verify IAM User Bedrock Permissions
+
+```bash
+# Check that your configured IAM user has Bedrock access
+aws bedrock describe-foundation-model \
+  --model-identifier anthropic.claude-3-5-haiku-20241022 \
+  --region us-east-1
+
+# Should return model details without errors
+```
+
+### Step 1.4: Quick Test of Bedrock Claude API
+
+```bash
+# Test invoking Claude Haiku
+aws bedrock-runtime invoke-model \
+  --model-id anthropic.claude-3-5-haiku-20241022 \
+  --region us-east-1 \
+  --body '{"max_tokens":100,"messages":[{"role":"user","content":"Say hello"}]}' \
+  /tmp/response.json
+
+# View response
+cat /tmp/response.json
+```
+
+✅ **Bedrock Models Verified**
 
 ---
 
-## Phase 2: AWS Account Setup (30 minutes)
+## Phase 2: Generate Voice Mode API Key (5 minutes)
 
-### Step 2.1: Create AWS Account
-
-1. Go to https://aws.amazon.com/
-2. Click "Create an AWS Account"
-3. Enter email address
-4. Create password (strong password required)
-5. Enter account name
-6. Enter contact information
-7. Enter payment method (credit/debit card)
-8. Verify phone number (receive SMS/call)
-9. Verify email address
-
-### Step 2.2: Enable AWS Billing Alerts
-
-1. Go to AWS Console
-2. Click your account name (top right)
-3. Click "Billing and cost management"
-4. Click "Billing preferences"
-5. Enable:
-   - ☑️ Receive PDF Invoice by Email
-   - ☑️ Receive Billing Alerts
-6. Save preferences
-
-### Step 2.3: Create AWS IAM User
-
-**Why**: Don't use root credentials for daily work
-
-1. Go to AWS Console > IAM
-2. Click "Users" in left menu
-3. Click "Create user"
-4. Username: `voice-mode-admin`
-5. Click "Next"
-6. Click "Attach policies directly"
-7. Search for and select:
-   - ☑️ `AdministratorAccess`
-8. Click "Next"
-9. Click "Create user"
-
-### Step 2.4: Create Access Keys for CLI
-
-1. Go to AWS Console > IAM > Users
-2. Click `voice-mode-admin`
-3. Click "Security credentials" tab
-4. Scroll to "Access keys"
-5. Click "Create access key"
-6. Select "Command Line Interface (CLI)"
-7. Click "Next"
-8. Click "Create access key"
-9. **COPY AND SAVE:**
-   ```
-   AWS_ACCESS_KEY_ID=AKIA...
-   AWS_SECRET_ACCESS_KEY=...
-   ```
-10. Click "Done"
-
-**⚠️ WARNING**: Never share these keys! Store securely.
-
-### Step 2.5: Configure AWS CLI
-
-1. Install AWS CLI:
-   ```bash
-   # macOS with Homebrew
-   brew install awscli
-
-   # Or download from: https://aws.amazon.com/cli/
-   ```
-
-2. Verify installation:
-   ```bash
-   aws --version
-   ```
-
-3. Configure credentials:
-   ```bash
-   aws configure
-   ```
-
-4. Enter when prompted:
-   ```
-   AWS Access Key ID: AKIA...
-   AWS Secret Access Key: ...
-   Default region name: us-east-1
-   Default output format: json
-   ```
-
-5. Verify configuration:
-   ```bash
-   aws sts get-caller-identity
-
-   # Should output:
-   # {
-   #     "UserId": "...",
-   #     "Account": "123456789012",
-   #     "Arn": "arn:aws:iam::123456789012:user/voice-mode-admin"
-   # }
-   ```
-
-**Save your Account ID** (12-digit number in Arn):
-```
-AWS_ACCOUNT_ID=123456789012
-```
-
-### Step 2.6: Set Up CloudWatch Alarms
-
-1. Go to AWS Console > CloudWatch
-2. Click "Alarms" > "Create Alarm"
-3. Select metric: "Estimated Charges"
-4. Set threshold: $50
-5. Action: Email notification
-6. Enter your email
-7. Create alarm
-8. Verify email in inbox
-
-✅ **AWS Account Setup Complete**
-
----
-
-## Phase 3: Generate Voice Mode API Key (5 minutes)
-
-### Step 3.1: Generate Secure API Key
+### Step 2.1: Generate Secure API Key
 
 Open terminal and run:
 
@@ -212,35 +88,34 @@ a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2
 ```
 
 **Save this securely:**
-```
-VOICE_MODE_API_KEY=a1b2c3d4e5f6...
+```bash
+export VOICE_MODE_API_KEY="a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2"
 ```
 
-### Step 3.2: Store Credentials Securely
+### Step 2.2: Store Credentials Securely
 
-Create a `.env.local` file (never commit to git):
+Create a `.env.local` file in the project root (never commit to git):
 
 ```bash
 # .env.local (ADD TO .gitignore)
-export OPENAI_API_KEY="sk-..."
-export VOICE_MODE_API_KEY="a1b2c3d4..."
 export AWS_ACCOUNT_ID="123456789012"
 export AWS_REGION="us-east-1"
+export VOICE_MODE_API_KEY="a1b2c3d4e5f6..."
 ```
 
 Load credentials:
 ```bash
 source .env.local
-echo $OPENAI_API_KEY  # Should show your key
+echo $VOICE_MODE_API_KEY  # Should show your key
 ```
 
-✅ **API Keys Ready**
+✅ **API Key Generated**
 
 ---
 
-## Phase 4: Deploy AWS Infrastructure (45 minutes)
+## Phase 3: Deploy Voice Mode Infrastructure (30 minutes)
 
-### Step 4.1: Validate CloudFormation Template
+### Step 3.1: Validate CloudFormation Template
 
 ```bash
 cd voice-mode
@@ -252,46 +127,45 @@ aws cloudformation validate-template \
 # Should output: "TemplateDescription": "Voice Mode..."
 ```
 
-### Step 4.2: Deploy CloudFormation Stack
+### Step 3.2: Deploy CloudFormation Stack
 
 ```bash
-# Create the stack
+# Deploy the Voice Mode stack
 aws cloudformation create-stack \
   --stack-name voice-mode-stack-dev \
   --template-body file://aws-infrastructure/cloudformation.yaml \
   --parameters \
     ParameterKey=Environment,ParameterValue=dev \
-    ParameterKey=OpenAIApiKey,ParameterValue=$OPENAI_API_KEY \
     ParameterKey=ApiKeyValue,ParameterValue=$VOICE_MODE_API_KEY \
   --capabilities CAPABILITY_NAMED_IAM \
   --region $AWS_REGION
 
-# Output:
-# {
-#     "StackId": "arn:aws:cloudformation:us-east-1:123456789012:stack/voice-mode-stack-dev/..."
-# }
+# Output will show StackId:
+# arn:aws:cloudformation:us-east-1:123456789012:stack/voice-mode-stack-dev/...
 ```
 
-### Step 4.3: Monitor Stack Creation
+**Note:** This stack creates:
+- Lambda function for audio transcription (Bedrock integration)
+- API Gateway HTTPS endpoint with custom authorization
+- DynamoDB table for transcription history
+- S3 bucket for audio storage
+- IAM roles with least-privilege permissions
+- CloudWatch logging
+
+### Step 3.3: Monitor Stack Creation
 
 ```bash
-# Watch in real-time (if you have 'watch' command)
-watch -n 5 'aws cloudformation describe-stacks \
-  --stack-name voice-mode-stack-dev \
-  --query "Stacks[0].[StackStatus,StackStatusReason]" \
-  --region $AWS_REGION'
-
-# Or check manually (takes 3-5 minutes)
+# Check status (takes 3-5 minutes)
 aws cloudformation describe-stacks \
   --stack-name voice-mode-stack-dev \
+  --query "Stacks[0].[StackStatus,StackStatusReason]" \
   --region $AWS_REGION
+
+# Expected status progression:
+# CREATE_IN_PROGRESS → CREATE_COMPLETE ✅
 ```
 
-**Expected Statuses:**
-- `CREATE_IN_PROGRESS` → (wait)
-- `CREATE_COMPLETE` → ✅ Success!
-
-### Step 4.4: Get Stack Outputs
+### Step 3.4: Get Stack Outputs (API Endpoint)
 
 ```bash
 # Get all outputs
@@ -301,97 +175,104 @@ aws cloudformation describe-stacks \
   --region $AWS_REGION \
   --output table
 
-# Get specific output (API endpoint)
-API_ENDPOINT=$(aws cloudformation describe-stacks \
+# Get API endpoint specifically
+export VOICE_MODE_API_ENDPOINT=$(aws cloudformation describe-stacks \
   --stack-name voice-mode-stack-dev \
   --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
   --output text \
   --region $AWS_REGION)
 
-echo $API_ENDPOINT
+echo "API Endpoint: $VOICE_MODE_API_ENDPOINT"
 # Output: https://xxxxx.execute-api.us-east-1.amazonaws.com/dev
 ```
 
 **Save the API Endpoint:**
-```
-VOICE_MODE_API_ENDPOINT=https://xxxxx.execute-api.us-east-1.amazonaws.com/dev
+```bash
+export VOICE_MODE_API_ENDPOINT="https://xxxxx.execute-api.us-east-1.amazonaws.com/dev"
 ```
 
-### Step 4.5: Verify AWS Resources
+### Step 3.5: Verify All Resources Created
 
 ```bash
 # Check Lambda function
 aws lambda get-function \
   --function-name voice-mode-transcribe-dev \
-  --region $AWS_REGION
+  --region $AWS_REGION | head -20
 
 # Check DynamoDB table
 aws dynamodb describe-table \
   --table-name voice-mode-transcriptions-dev \
+  --query "Table.[TableName,TableStatus,ItemCount]" \
   --region $AWS_REGION
 
 # Check S3 bucket
 aws s3 ls | grep voice-mode-audio
 
-# Check API Gateway
-aws apigateway get-rest-apis \
-  --region $AWS_REGION
+# All should show existing resources
 ```
 
-### Step 4.6: Test API Gateway
+### Step 3.6: Test API Authorization
 
 ```bash
-# Test without authentication (should fail with 403)
-curl -X POST "$API_ENDPOINT/transcribe" \
+# Test WITHOUT API key (should fail with 403)
+curl -X POST "$VOICE_MODE_API_ENDPOINT/transcribe" \
   -H "Content-Type: application/json" \
-  -d '{"audio":"","filename":"test.m4a"}'
+  -d '{"audio":"test"}' -v
 
-# Expected response: 403 Forbidden or "Unauthorized"
+# Expected: 403 Forbidden
 
-# Test with correct API key (will fail on audio but that's ok)
-curl -X POST "$API_ENDPOINT/transcribe" \
+# Test WITH API key (auth working, but audio will fail)
+curl -X POST "$VOICE_MODE_API_ENDPOINT/transcribe" \
   -H "Authorization: Bearer $VOICE_MODE_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "audio":"SUQzBAAAAAAAI1NTU...",
-    "filename":"test.m4a",
-    "userId":"test"
-  }' -v
+  -d '{"audio":"","filename":"test.m4a","userId":"test"}' -v
 
-# Should see 500 or error about invalid audio (that's ok for now)
-# Important: No 403 error means auth is working!
+# Expected: 500 error or audio validation error (that's ok)
+# Important: Not 403 means authorization is working!
 ```
 
-✅ **AWS Infrastructure Deployed**
+✅ **Voice Mode Infrastructure Deployed**
 
 ---
 
-## Phase 5: Configure GitHub for CI/CD (45 minutes)
+## Phase 4: Configure GitHub for CI/CD (20 minutes)
 
-### Step 5.1: Set Up AWS OIDC Provider
+**Note:** This assumes you already have IAM users/groups configured. We'll set up GitHub Actions to automatically deploy changes.
 
-**Why**: GitHub can authenticate with AWS without storing credentials
+### Step 4.1: Check if OIDC Provider Exists
 
 ```bash
-# Create OIDC provider
+# List existing OIDC providers
+aws iam list-open-id-connect-providers \
+  --region us-east-1
+
+# Look for: arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com
+```
+
+**If it doesn't exist, create it:**
+
+```bash
 aws iam create-open-id-connect-provider \
   --url "https://token.actions.githubusercontent.com" \
   --client-id-list "sts.amazonaws.com" \
   --thumbprint-list "6938fd4d98bab03faadb97b34396831e3780aca1" \
   --region us-east-1
 
-# Output:
-# "OpenIDConnectProviderArn": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+# Save the ARN from output
+export AWS_OIDC_PROVIDER_ARN="arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
 ```
 
-**Save the ARN:**
-```
-AWS_OIDC_PROVIDER_ARN=arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com
+### Step 4.2: Create or Verify GitHub Actions Role
+
+Check if role exists:
+
+```bash
+aws iam get-role \
+  --role-name VoiceModeGitHubActionsRole \
+  --region us-east-1
 ```
 
-### Step 5.2: Create GitHub OIDC Role
-
-Create trust policy file:
+**If it doesn't exist, create it:**
 
 ```bash
 cat > /tmp/trust-policy.json << 'EOF'
@@ -401,7 +282,7 @@ cat > /tmp/trust-policy.json << 'EOF'
     {
       "Effect": "Allow",
       "Principal": {
-        "Federated": "arn:aws:iam::ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+        "Federated": "arn:aws:iam::AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
@@ -409,7 +290,7 @@ cat > /tmp/trust-policy.json << 'EOF'
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:GITHUB_USER/voice-mode:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub": "repo:lucasdickey/voice-mode:ref:refs/heads/main"
         }
       }
     }
@@ -417,31 +298,17 @@ cat > /tmp/trust-policy.json << 'EOF'
 }
 EOF
 
-# Replace ACCOUNT_ID and GITHUB_USER:
-sed -i "s/ACCOUNT_ID/$AWS_ACCOUNT_ID/g" /tmp/trust-policy.json
-sed -i "s/GITHUB_USER/YOUR_GITHUB_USERNAME/g" /tmp/trust-policy.json
-```
+# Replace with your account ID
+sed -i "s/AWS_ACCOUNT_ID/$AWS_ACCOUNT_ID/g" /tmp/trust-policy.json
 
-Create the role:
-
-```bash
+# Create the role
 aws iam create-role \
   --role-name VoiceModeGitHubActionsRole \
   --assume-role-policy-document file:///tmp/trust-policy.json \
   --region us-east-1
-
-# Output:
-# "Arn": "arn:aws:iam::123456789012:role/VoiceModeGitHubActionsRole"
 ```
 
-**Save the Role ARN:**
-```
-AWS_GITHUB_ACTIONS_ROLE=arn:aws:iam::123456789012:role/VoiceModeGitHubActionsRole
-```
-
-### Step 5.3: Add Permissions to GitHub Role
-
-Create policy:
+### Step 4.3: Add Permissions to GitHub Actions Role
 
 ```bash
 cat > /tmp/github-policy.json << 'EOF'
@@ -457,7 +324,8 @@ cat > /tmp/github-policy.json << 'EOF'
         "apigateway:*",
         "dynamodb:*",
         "s3:*",
-        "logs:*"
+        "logs:*",
+        "bedrock:*"
       ],
       "Resource": "*"
     }
@@ -473,282 +341,468 @@ aws iam put-role-policy \
   --region us-east-1
 ```
 
-### Step 5.4: Add GitHub Secrets
+### Step 4.4: Add GitHub Secrets
 
-1. Go to your GitHub repository: https://github.com/lucasdickey/voice-mode
-2. Click **Settings** → **Secrets and variables** → **Actions**
-3. Click **New repository secret**
+1. Go to: https://github.com/lucasdickey/voice-mode/settings/secrets/actions
+2. Click **New repository secret** for each:
 
-Add these secrets:
+```
+AWS_ROLE_ARN = arn:aws:iam::123456789012:role/VoiceModeGitHubActionsRole
+VOICE_MODE_API_KEY = a1b2c3d4... (from Phase 2)
+AWS_ACCOUNT_ID = 123456789012
+AWS_REGION = us-east-1
+```
 
-| Secret Name | Value |
-|-------------|-------|
-| `AWS_ROLE_ARN` | `arn:aws:iam::123456789012:role/VoiceModeGitHubActionsRole` |
-| `OPENAI_API_KEY` | `sk-xxxx...` (your OpenAI key) |
-| `VOICE_MODE_API_KEY` | `a1b2c3d4...` (generated API key) |
+### Step 4.5: Test GitHub Actions Workflow
 
-**To add each secret:**
-1. Click "New repository secret"
-2. Name: (copy from table above)
-3. Secret: (copy value from above)
-4. Click "Add secret"
-
-**Verify all 3 are added:**
-- ✅ AWS_ROLE_ARN
-- ✅ OPENAI_API_KEY
-- ✅ VOICE_MODE_API_KEY
-
-### Step 5.5: Test GitHub Actions Manually
-
-1. Go to GitHub repository
-2. Click **Actions** tab
-3. Click **Deploy to AWS** workflow
-4. Click **Run workflow** button
-5. Environment: `dev`
-6. Click **Run workflow**
-
-**Monitor the deployment:**
-1. Watch the workflow run
-2. Check the logs in real-time
-3. Should complete in ~5-10 minutes
-
-**Check results:**
 ```bash
-# Verify deployment
-aws cloudformation describe-stacks \
-  --stack-name voice-mode-stack-dev \
-  --query "Stacks[0].StackStatus"
+# View the workflow file
+cat .github/workflows/deploy.yml
 
-# Should show: CREATE_COMPLETE
+# The workflow will automatically run on push to main
+# Or manually trigger from GitHub UI:
+# Actions tab → "Deploy to AWS" → Run workflow → dev environment
 ```
 
 ✅ **GitHub CI/CD Configured**
 
 ---
 
-## Phase 6: Configure Android App (20 minutes)
+## Phase 5: Configure Android App (20 minutes)
 
-### Step 6.1: Update API Endpoint
+### Step 5.1: Update Android App Configuration
 
-Edit `app/src/main/java/com/voicemode/aws/BedrockService.kt`:
+The Android app uses `ConfigManager` for secure credential storage. Update with your API endpoint and key:
+
+Edit `app/src/main/java/com/voicemode/config/ConfigManager.kt`:
 
 ```kotlin
-class BedrockService(
-    private val apiEndpoint: String,
-    private val apiKey: String
-) {
-    // Implementation...
+// Initialize with your values from Phase 2 & 3:
+val endpoint = "https://xxxxx.execute-api.us-east-1.amazonaws.com/dev"  // From Phase 3.4
+val apiKey = "a1b2c3d4e5f6..."  // From Phase 2.1
+```
+
+Or set them programmatically in `MainActivity.kt`:
+
+```kotlin
+override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+
+    val configManager = ConfigManager(this)
+    configManager.setApiEndpoint("https://xxxxx.execute-api.us-east-1.amazonaws.com/dev")
+    configManager.setApiKey("a1b2c3d4e5f6...")
+
+    // Rest of initialization...
 }
 ```
 
-Edit `app/src/main/java/com/voicemode/VoiceModeAccessibilityService.kt`:
-
-Find this function:
-```kotlin
-private fun getBedrockApiEndpoint(): String {
-    return "http://your-backend-api.com"  // ← CHANGE THIS
-}
-
-private fun getBedrockApiKey(): String {
-    return "your-api-key"  // ← CHANGE THIS
-}
+**Verify the values:**
+```bash
+# From environment:
+echo "API Endpoint: $VOICE_MODE_API_ENDPOINT"
+echo "API Key: $VOICE_MODE_API_KEY"
 ```
 
-Replace with:
-```kotlin
-private fun getBedrockApiEndpoint(): String {
-    return "https://xxxxx.execute-api.us-east-1.amazonaws.com/dev"  // Your API endpoint
-}
-
-private fun getBedrockApiKey(): String {
-    return "a1b2c3d4..."  // Your VOICE_MODE_API_KEY
-}
-```
-
-### Step 6.2: Better: Use ConfigManager (Recommended)
-
-Instead of hardcoding, use secure storage:
-
-```kotlin
-// In MainActivity.kt onCreate():
-val configManager = ConfigManager(context)
-configManager.setApiEndpoint("https://xxxxx.execute-api.us-east-1.amazonaws.com/dev")
-configManager.setApiKey("a1b2c3d4...")
-
-// Then in BedrockService:
-val endpoint = configManager.getApiEndpoint()
-val apiKey = configManager.getApiKey()
-```
-
-### Step 6.3: Build Debug APK
+### Step 5.2: Build Debug APK
 
 ```bash
+cd voice-mode
 ./gradlew clean assembleDebug
 
 # Output: app/build/outputs/apk/debug/app-debug.apk (8.9 MB)
+
+# Verify APK was created
+ls -lh app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### Step 6.4: Install on Device
+### Step 5.3: Install on Connected Device
 
 ```bash
+# List connected devices
+adb devices
+
+# Install APK
 adb install app/build/outputs/apk/debug/app-debug.apk
 
-# Or reinstall:
+# Or reinstall if already installed:
 adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# Verify installation
+adb shell pm list packages | grep voicemode
 ```
 
-### Step 6.5: Grant Permissions
+### Step 5.4: Grant Required Permissions
 
-1. Open app
-2. Tap "Enable Accessibility Service" button
-3. Go to Settings → Accessibility
-4. Find "Voice Mode"
-5. Enable it
-6. When prompted, grant microphone permission
+1. **Open the Voice Mode app**
+2. **Enable Accessibility Service:**
+   - Tap "Enable Accessibility Service" button (or similar)
+   - Go to Settings → Accessibility → Services
+   - Find "Voice Mode"
+   - Toggle it ON
+3. **Grant Microphone Permission:**
+   - When prompted, tap "Allow"
+   - Verify in Settings → Apps → Voice Mode → Permissions
+
+**Required Permissions:**
+- ☑️ RECORD_AUDIO (microphone)
+- ☑️ INTERNET (API calls)
+- ☑️ MODIFY_AUDIO_SETTINGS
+- ☑️ SYSTEM_ALERT_WINDOW (FAB overlay)
+
+### Step 5.5: Verify App Configuration
+
+```bash
+# Check app logs for configuration
+adb logcat | grep -i "voicemode\|config\|endpoint"
+
+# Should show successful initialization
+```
 
 ✅ **Android App Configured**
 
 ---
 
-## Phase 7: End-to-End Testing (30 minutes)
+## Phase 6: Quick Pre-Test Validation (10 minutes)
 
-### Step 7.1: Test Android App
+Before full end-to-end testing, verify all pieces are in place:
 
-1. Open any app with text input (Notes, Email, etc.)
-2. Focus on a text field
-3. You should see a 🎤 FAB button appear
-4. Tap the button
-5. Speak: "Hello world"
-6. Wait 3-5 seconds
-7. Check logs:
+### Step 6.1: Verify Environment Variables
 
 ```bash
-adb logcat | grep -i "transcribe\|cloud\|bedrock"
+# Check all required values are set
+echo "=== Configuration ==="
+echo "AWS Account: $AWS_ACCOUNT_ID"
+echo "AWS Region: $AWS_REGION"
+echo "API Endpoint: $VOICE_MODE_API_ENDPOINT"
+echo "API Key: ${VOICE_MODE_API_KEY:0:16}..." # Show first 16 chars only
+
+# All should be set
 ```
 
-### Step 7.2: Monitor Lambda
+### Step 6.2: Test API Endpoint Connectivity
 
 ```bash
-# View Lambda logs
-aws logs tail /aws/lambda/voice-mode-transcribe-dev --follow
+# Test API is accessible and authentication works
+curl -X POST "$VOICE_MODE_API_ENDPOINT/transcribe" \
+  -H "Authorization: Bearer $VOICE_MODE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"audio":"","filename":"test.m4a","userId":"test"}' \
+  --write-out "\nHTTP Status: %{http_code}\n" \
+  -v
 
-# Should show:
-# - Receiving request
-# - Uploading to S3
-# - Calling OpenAI
-# - Storing in DynamoDB
-# - Returning response
+# Expected: 200 or 400 (validation error) - NOT 401/403
 ```
 
-### Step 7.3: Check DynamoDB
+### Step 6.3: Check Lambda Function
 
 ```bash
-# Scan transcriptions table
-aws dynamodb scan \
-  --table-name voice-mode-transcriptions-dev \
+# Verify Lambda is deployed and healthy
+aws lambda get-function \
+  --function-name voice-mode-transcribe-dev \
+  --region $AWS_REGION \
+  --query 'Configuration.[FunctionName,Runtime,MemorySize,Timeout]'
+
+# Should show your Lambda function details
+```
+
+### Step 6.4: Verify Bedrock Access from Lambda
+
+```bash
+# Check Lambda execution role has Bedrock permissions
+aws lambda get-policy \
+  --function-name voice-mode-transcribe-dev \
   --region $AWS_REGION
 
-# Should show entries with your transcriptions
+# Verify the role in IAM
+LAMBDA_ROLE=$(aws lambda get-function \
+  --function-name voice-mode-transcribe-dev \
+  --query 'Configuration.Role' \
+  --output text)
+
+aws iam get-role-policy \
+  --role-name $(echo $LAMBDA_ROLE | awk -F'/' '{print $NF}') \
+  --policy-name voice-mode-execution-policy \
+  --query 'RolePolicyDocument'
 ```
 
-### Step 7.4: Check S3
+✅ **Pre-Test Validation Complete**
+
+---
+
+## Phase 7: End-to-End Testing (30 minutes)
+
+### Step 7.1: Quick API Test (No Android)
+
+Test the API directly before testing on device:
 
 ```bash
-# List audio files
-aws s3 ls s3://voice-mode-audio-* --recursive
+# Create a small test audio file (can be empty for initial test)
+curl -X POST "$VOICE_MODE_API_ENDPOINT/transcribe" \
+  -H "Authorization: Bearer $VOICE_MODE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "audio":"",
+    "filename":"test.m4a",
+    "userId":"test-user-1"
+  }' \
+  --output response.json
 
-# Should show your recorded audio files
+# Check response
+cat response.json | jq .
+
+# Should show response (may error on empty audio, that's ok)
 ```
 
-### Step 7.5: Check CloudWatch Metrics
+### Step 7.2: Monitor Lambda During Test
 
-1. Go to AWS Console
-2. CloudWatch → Dashboards
-3. Look for Lambda metrics:
-   - Duration (should be 10-30 seconds)
-   - Errors (should be 0)
-   - Invocations (should match your tests)
+In a separate terminal, watch Lambda logs:
 
-### Step 7.6: Test Different Scenarios
+```bash
+# Real-time log tail
+aws logs tail /aws/lambda/voice-mode-transcribe-dev --follow
 
-**Test 1: Clean speech**
+# Should show logs from your API call:
+# - Request received
+# - Audio processing
+# - Bedrock invocation
+# - DynamoDB write
+# - Response sent
+```
+
+### Step 7.3: Test with Android App
+
+1. **Open the Voice Mode app** on device/emulator
+2. **Open any app with text input** (Notes, Messages, Email, etc.)
+3. **Tap in a text field** - the 🎤 FAB button should appear
+4. **Tap the microphone button**
+5. **Speak clearly**: "Hello world"
+6. **Wait 10-20 seconds** (Bedrock Whisper processing time)
+7. **Check the transcription** appears in logs:
+
+```bash
+# Monitor for app logs
+adb logcat | grep -i "voicemode\|transcribe"
+
+# Look for:
+# - "Recording started"
+# - "Sending to API"
+# - "Transcription received"
+```
+
+### Step 7.4: Verify Data Stored in DynamoDB
+
+```bash
+# Scan the transcriptions table
+aws dynamodb scan \
+  --table-name voice-mode-transcriptions-dev \
+  --region $AWS_REGION \
+  --limit 5
+
+# Should show recent entries with:
+# - transcriptionId
+# - userId
+# - timestamp
+# - transcribedText
+# - audioFileUrl (S3 path)
+```
+
+### Step 7.5: Verify Audio in S3
+
+```bash
+# List audio files stored
+aws s3 ls s3://voice-mode-audio-dev/ --recursive --human-readable
+
+# Should show audio files for each transcription
+# Named pattern: audio/USER_ID/TIMESTAMP.m4a
+```
+
+### Step 7.6: Check CloudWatch Metrics
+
+```bash
+# Get Lambda invocation count
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Invocations \
+  --dimensions Name=FunctionName,Value=voice-mode-transcribe-dev \
+  --start-time $(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum \
+  --region $AWS_REGION
+
+# Get Lambda errors
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Errors \
+  --dimensions Name=FunctionName,Value=voice-mode-transcribe-dev \
+  --start-time $(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum \
+  --region $AWS_REGION
+
+# Get Lambda duration
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Duration \
+  --dimensions Name=FunctionName,Value=voice-mode-transcribe-dev \
+  --start-time $(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Average,Maximum \
+  --region $AWS_REGION
+```
+
+### Step 7.7: Test Different Audio Scenarios
+
+**Scenario 1: Clear speech**
 - Speak: "Hello world"
-- Expect: "hello world" (lowercased)
+- Expect: Transcribed text appears in DynamoDB
 
-**Test 2: With pauses**
-- Speak: "I am... testing... Voice Mode"
-- Expect: "I am testing Voice Mode"
+**Scenario 2: Multiple words**
+- Speak: "This is a test of the Voice Mode application"
+- Expect: Full sentence transcribed
 
-**Test 3: With numbers**
-- Speak: "My phone number is five five five one two three four"
-- Expect: Transcribed with numbers or words
+**Scenario 3: Numbers**
+- Speak: "My number is five five five one two three four"
+- Expect: Numbers captured (as digits or words)
 
-**Test 4: With punctuation**
-- Speak: "Question mark? Exclamation point!"
-- Expect: Some punctuation detection
+**Scenario 4: Natural pauses**
+- Speak: "Testing... one... two... three"
+- Expect: Transcription handles pauses
 
-✅ **All Systems Testing Complete**
+**All test results should be:**
+- ✅ Stored in DynamoDB
+- ✅ Audio file saved in S3
+- ✅ CloudWatch logs showing successful processing
+- ✅ No errors in Lambda logs
+
+✅ **End-to-End Testing Complete**
 
 ---
 
 ## Phase 8: Production Setup (30 minutes - Optional)
 
-If you want to deploy to staging/production:
+Once you've validated in dev, deploy to staging and production environments.
 
 ### Step 8.1: Create Staging Stack
 
 ```bash
+# Deploy staging (separate from dev)
 aws cloudformation create-stack \
   --stack-name voice-mode-stack-staging \
   --template-body file://aws-infrastructure/cloudformation.yaml \
   --parameters \
     ParameterKey=Environment,ParameterValue=staging \
-    ParameterKey=OpenAIApiKey,ParameterValue=$OPENAI_API_KEY \
     ParameterKey=ApiKeyValue,ParameterValue=$VOICE_MODE_API_KEY \
   --capabilities CAPABILITY_NAMED_IAM \
   --region $AWS_REGION
 
+# Wait for creation
+aws cloudformation wait stack-create-complete \
+  --stack-name voice-mode-stack-staging \
+  --region $AWS_REGION
+
 # Get staging endpoint
-STAGING_ENDPOINT=$(aws cloudformation describe-stacks \
+export VOICE_MODE_API_ENDPOINT_STAGING=$(aws cloudformation describe-stacks \
   --stack-name voice-mode-stack-staging \
   --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
-  --output text)
+  --output text \
+  --region $AWS_REGION)
 
-echo $STAGING_ENDPOINT
+echo "Staging Endpoint: $VOICE_MODE_API_ENDPOINT_STAGING"
 ```
 
 ### Step 8.2: Create Production Stack
 
 ```bash
-# NOTE: Be very careful with production!
+# ⚠️ PRODUCTION: Be careful with prod settings!
+
 aws cloudformation create-stack \
   --stack-name voice-mode-stack-prod \
   --template-body file://aws-infrastructure/cloudformation.yaml \
   --parameters \
     ParameterKey=Environment,ParameterValue=prod \
-    ParameterKey=OpenAIApiKey,ParameterValue=$OPENAI_API_KEY \
     ParameterKey=ApiKeyValue,ParameterValue=$VOICE_MODE_API_KEY \
   --capabilities CAPABILITY_NAMED_IAM \
   --region $AWS_REGION
 
+# Wait for creation
+aws cloudformation wait stack-create-complete \
+  --stack-name voice-mode-stack-prod \
+  --region $AWS_REGION
+
 # Get production endpoint
-PROD_ENDPOINT=$(aws cloudformation describe-stacks \
+export VOICE_MODE_API_ENDPOINT_PROD=$(aws cloudformation describe-stacks \
   --stack-name voice-mode-stack-prod \
   --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
-  --output text)
+  --output text \
+  --region $AWS_REGION)
 
-echo $PROD_ENDPOINT
+echo "Production Endpoint: $VOICE_MODE_API_ENDPOINT_PROD"
 ```
 
-### Step 8.3: Monitor Costs
+### Step 8.3: Update Android App for Production
+
+Update `ConfigManager` or `MainActivity` to use production endpoint:
+
+```kotlin
+// For production builds:
+val endpoint = VOICE_MODE_API_ENDPOINT_PROD  // From Phase 8.2
+
+// Build production APK
+./gradlew clean assembleRelease
+```
+
+### Step 8.4: Monitor Bedrock Costs
 
 ```bash
-# Check current month costs
+# Check current month costs (all services)
 aws ce get-cost-and-usage \
   --time-period Start=$(date +%Y-%m-01),End=$(date +%Y-%m-%d) \
   --granularity DAILY \
   --metrics UnblendedCost \
-  --group-by Type=DIMENSION,Key=SERVICE
+  --group-by Type=DIMENSION,Key=SERVICE \
+  --region $AWS_REGION
+
+# Filter for Bedrock specifically
+aws ce get-cost-and-usage \
+  --time-period Start=$(date +%Y-%m-01),End=$(date +%Y-%m-%d) \
+  --granularity DAILY \
+  --metrics UnblendedCost \
+  --filter file://bedrock-filter.json \
+  --region $AWS_REGION
+```
+
+### Step 8.5: Set Up Production Alarms
+
+```bash
+# Create alarm for high Lambda errors
+aws cloudwatch put-metric-alarm \
+  --alarm-name voice-mode-prod-errors \
+  --alarm-description "Alert on Lambda errors in production" \
+  --metric-name Errors \
+  --namespace AWS/Lambda \
+  --statistic Sum \
+  --period 300 \
+  --threshold 5 \
+  --comparison-operator GreaterThanThreshold \
+  --dimensions Name=FunctionName,Value=voice-mode-transcribe-prod \
+  --alarm-actions arn:aws:sns:us-east-1:123456789012:billing-alerts \
+  --region $AWS_REGION
+
+# Create alarm for Lambda duration
+aws cloudwatch put-metric-alarm \
+  --alarm-name voice-mode-prod-duration \
+  --alarm-description "Alert if Lambda takes too long" \
+  --metric-name Duration \
+  --namespace AWS/Lambda \
+  --statistic Average \
+  --period 300 \
+  --threshold 60000 \
+  --comparison-operator GreaterThanThreshold \
+  --dimensions Name=FunctionName,Value=voice-mode-transcribe-prod \
+  --region $AWS_REGION
 ```
 
 ✅ **Production Ready (Optional)**
@@ -757,91 +811,160 @@ aws ce get-cost-and-usage \
 
 ## Final Verification Checklist
 
-### Credentials ✅
-- [ ] OpenAI API key working
-- [ ] AWS credentials configured
-- [ ] Voice Mode API key generated
-- [ ] All stored securely (not in git)
+### Phase 1: Bedrock Access ✅
+- [ ] Claude 3.5 Haiku model available
+- [ ] Whisper model accessible
+- [ ] IAM user has Bedrock permissions
+- [ ] Can invoke Bedrock API successfully
 
-### AWS Infrastructure ✅
-- [ ] CloudFormation stack created
-- [ ] Lambda function deployed
+### Phase 2: API Key ✅
+- [ ] Generated secure VOICE_MODE_API_KEY
+- [ ] Stored in .env.local (not committed to git)
+- [ ] Available in environment variables
+
+### Phase 3: AWS Infrastructure ✅
+- [ ] CloudFormation template validated
+- [ ] Stack created successfully
+- [ ] Lambda function deployed (voice-mode-transcribe-dev)
 - [ ] API Gateway endpoint accessible
 - [ ] DynamoDB table created
 - [ ] S3 bucket created
-- [ ] CloudWatch logs flowing
+- [ ] CloudWatch logs configured
 
-### GitHub CI/CD ✅
-- [ ] OIDC provider created
+### Phase 4: GitHub CI/CD ✅
+- [ ] AWS OIDC provider exists
 - [ ] GitHub Actions role created
-- [ ] Secrets added to repository
-- [ ] Workflow tested successfully
+- [ ] Secrets added to repository (AWS_ROLE_ARN, VOICE_MODE_API_KEY, AWS_ACCOUNT_ID, AWS_REGION)
+- [ ] Workflow file at .github/workflows/deploy.yml
 
-### Android App ✅
-- [ ] API endpoint configured
-- [ ] APK built and installed
-- [ ] Accessibility service enabled
+### Phase 5: Android App ✅
+- [ ] ConfigManager configured with API endpoint
+- [ ] ConfigManager configured with API key
+- [ ] APK built successfully (8.9 MB)
+- [ ] Accessibility service enabled on device
 - [ ] Microphone permission granted
 
-### End-to-End ✅
-- [ ] Can record audio
-- [ ] Can send to API
-- [ ] Transcription works
-- [ ] Results stored in DynamoDB
-- [ ] Audio stored in S3
-- [ ] Logs visible in CloudWatch
+### Phase 6: Pre-Test Validation ✅
+- [ ] All environment variables set (AWS_ACCOUNT_ID, AWS_REGION, VOICE_MODE_API_ENDPOINT, VOICE_MODE_API_KEY)
+- [ ] API endpoint responds (curl test passes)
+- [ ] Lambda function health check passes
+- [ ] Lambda has Bedrock permissions
+
+### Phase 7: End-to-End Testing ✅
+- [ ] API responds to test requests
+- [ ] Lambda processes requests successfully
+- [ ] Transcriptions stored in DynamoDB
+- [ ] Audio files stored in S3
+- [ ] CloudWatch metrics show invocations
+- [ ] No errors in Lambda logs
+- [ ] Android app records and sends audio successfully
 
 ---
 
 ## Troubleshooting Reference
 
+### Bedrock Access Denied
+
+```bash
+# Verify IAM user has Bedrock permissions
+aws iam get-user-policy \
+  --user-name YOUR_USER_NAME \
+  --policy-name bedrock-policy
+
+# Or check inline policies
+aws iam list-user-policies --user-name YOUR_USER_NAME
+
+# Add Bedrock permissions if missing:
+# Go to IAM Console → Users → Attach Bedrock policy
+```
+
 ### CloudFormation Stack Failed
 
 ```bash
-# Check events
+# Check stack events in order
 aws cloudformation describe-stack-events \
   --stack-name voice-mode-stack-dev \
-  --query "StackEvents[0:10]"
+  --region $AWS_REGION \
+  --query "StackEvents[0:20]" \
+  --output table
 
-# Check specific error
+# Check specific error message
 aws cloudformation describe-stacks \
   --stack-name voice-mode-stack-dev \
+  --region $AWS_REGION \
   --query "Stacks[0].StackStatusReason"
+
+# If failed, delete and retry
+aws cloudformation delete-stack --stack-name voice-mode-stack-dev --region $AWS_REGION
 ```
 
-### Lambda Not Running
+### Lambda Errors
 
 ```bash
-# Check function exists
-aws lambda get-function --function-name voice-mode-transcribe-dev
+# View Lambda logs
+aws logs tail /aws/lambda/voice-mode-transcribe-dev --follow --region $AWS_REGION
 
-# Check environment variables
+# Check Lambda configuration
 aws lambda get-function-configuration \
-  --function-name voice-mode-transcribe-dev
+  --function-name voice-mode-transcribe-dev \
+  --region $AWS_REGION
 
-# Check execution role
-aws iam get-role --role-name voice-mode-transcribe-dev
+# Verify Lambda has Bedrock permissions
+LAMBDA_ROLE=$(aws lambda get-function --function-name voice-mode-transcribe-dev \
+  --query 'Configuration.Role' --output text --region $AWS_REGION)
+
+aws iam get-role-policy \
+  --role-name $(echo $LAMBDA_ROLE | awk -F'/' '{print $NF}') \
+  --policy-name voice-mode-execution-policy \
+  --region $AWS_REGION
 ```
 
-### API Gateway Not Responding
+### API Not Responding
 
 ```bash
-# Test without auth
-curl -X POST https://xxxxx.execute-api.us-east-1.amazonaws.com/dev/transcribe
+# Check API Gateway
+aws apigateway get-rest-apis --region $AWS_REGION
+
+# Test endpoint without auth (expect 403)
+curl -X POST "$VOICE_MODE_API_ENDPOINT/transcribe" \
+  -H "Content-Type: application/json" \
+  -d '{"audio":"test"}' -v
 
 # Test with auth
-curl -X POST https://xxxxx.execute-api.us-east-1.amazonaws.com/dev/transcribe \
+curl -X POST "$VOICE_MODE_API_ENDPOINT/transcribe" \
+  -H "Authorization: Bearer $VOICE_MODE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"audio":"","filename":"test.m4a"}' -v
+```
+
+### Android App Not Connecting
+
+```bash
+# Check app logs
+adb logcat | grep -i "voicemode\|endpoint\|api"
+
+# Verify API endpoint in app
+# Should match: $VOICE_MODE_API_ENDPOINT
+
+# Test connectivity from device
+adb shell curl -X POST "$VOICE_MODE_API_ENDPOINT/transcribe" \
   -H "Authorization: Bearer $VOICE_MODE_API_KEY"
 ```
 
-### DynamoDB Issues
+### Bedrock Invocation Fails
 
 ```bash
-# Check table exists
-aws dynamodb describe-table --table-name voice-mode-transcriptions-dev
+# Test Bedrock directly
+aws bedrock-runtime invoke-model \
+  --model-id anthropic.claude-3-5-haiku-20241022 \
+  --region us-east-1 \
+  --body '{"max_tokens":100,"messages":[{"role":"user","content":"test"}]}' \
+  /tmp/response.json
 
-# Check items
-aws dynamodb scan --table-name voice-mode-transcriptions-dev
+cat /tmp/response.json
+
+# Check Lambda logs for Bedrock errors
+aws logs tail /aws/lambda/voice-mode-transcribe-dev --follow
 ```
 
 ---
@@ -849,28 +972,47 @@ aws dynamodb scan --table-name voice-mode-transcriptions-dev
 ## Summary
 
 **You now have:**
-1. ✅ OpenAI API configured and tested
-2. ✅ AWS account set up with IAM user
-3. ✅ Voice Mode API key generated
-4. ✅ AWS infrastructure deployed
-5. ✅ GitHub OIDC configured
-6. ✅ GitHub Actions secrets set up
-7. ✅ Android app configured
-8. ✅ End-to-end tested
+1. ✅ AWS Bedrock configured (Claude Haiku + Whisper)
+2. ✅ Voice Mode API key generated
+3. ✅ AWS Lambda + API Gateway deployed
+4. ✅ DynamoDB + S3 infrastructure ready
+5. ✅ GitHub Actions CI/CD configured
+6. ✅ Android app built and configured
+7. ✅ End-to-end system tested
+
+**Architecture:**
+```
+Android App (Kotlin)
+    ↓ HTTPS
+API Gateway (Custom Auth)
+    ↓
+Lambda (Node.js + Bedrock)
+    ├→ Bedrock Whisper (STT)
+    ├→ S3 (Audio Storage)
+    └→ DynamoDB (Transcription History)
+```
+
+**Cost Summary:**
+- **Bedrock Claude Haiku**: ~$0.08 per 1K tokens
+- **Bedrock Whisper**: ~$0.02 per minute audio
+- **AWS Services (Lambda, DynamoDB, S3, API Gateway)**: ~$5/month after free tier
+- **Total**: ~$100-150/month for typical usage
 
 **Next Steps:**
-1. Monitor CloudWatch for errors
-2. Track AWS costs
-3. Plan scaling as usage grows
-4. Consider production deployment
+1. Deploy to staging environment (Phase 8.1)
+2. Monitor Bedrock costs: `aws ce get-cost-and-usage ...`
+3. Set up CloudWatch alarms for errors
+4. Plan production deployment
+5. Gather user feedback
 
-**Cost Tracking:**
-- Check AWS billing: https://console.aws.amazon.com/billing/
-- Monitor Lambda: CloudWatch → Metrics
-- Track OpenAI: https://platform.openai.com/account/usage/overview
+**Monitoring:**
+- Lambda logs: `aws logs tail /aws/lambda/voice-mode-transcribe-dev --follow`
+- API health: `curl -X POST $VOICE_MODE_API_ENDPOINT/transcribe -H "Authorization: Bearer $VOICE_MODE_API_KEY"`
+- Costs: https://console.aws.amazon.com/billing/
 
 ---
 
-**Total Time**: ~2-3 hours
-**Status**: 🚀 **READY FOR PRODUCTION**
+**Total Time**: ~1-1.5 hours
+**Status**: 🚀 **PRODUCTION READY**
+**Note**: Uses 100% AWS Bedrock - no external API keys needed
 
