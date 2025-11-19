@@ -72,8 +72,57 @@ class BedrockService(
         val confidence: Float
     )
 
+    /**
+     * Enhance transcribed text using Claude via Bedrock
+     */
+    suspend fun enhanceText(rawText: String): EnhancementResult {
+        return try {
+            val payload = EnhancementRequest(text = rawText)
+            val requestBody = gson.toJson(payload)
+                .toRequestBody("application/json".toMediaType())
+
+            val request = Request.Builder()
+                .url("$apiEndpoint/process-text")
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(requestBody)
+                .build()
+
+            val response = client.newCall(request).execute()
+
+            if (response.isSuccessful) {
+                val responseBody = response.body?.string() ?: ""
+                val result = gson.fromJson(responseBody, EnhancementResponse::class.java)
+                EnhancementResult.Success(result.processed)
+            } else {
+                val errorBody = response.body?.string() ?: "Unknown error"
+                Log.e(TAG, "Enhancement failed: $errorBody")
+                EnhancementResult.Error("HTTP ${response.code}: $errorBody")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Enhancement error", e)
+            EnhancementResult.Error(e.message ?: "Unknown error")
+        }
+    }
+
+    data class EnhancementRequest(
+        val text: String
+    )
+
+    data class EnhancementResponse(
+        val processed: String,
+        val original: String,
+        val timestamp: String,
+        val model: String
+    )
+
     sealed class TranscriptionResult {
         data class Success(val text: String, val confidence: Float) : TranscriptionResult()
         data class Error(val message: String) : TranscriptionResult()
+    }
+
+    sealed class EnhancementResult {
+        data class Success(val text: String) : EnhancementResult()
+        data class Error(val message: String) : EnhancementResult()
     }
 }

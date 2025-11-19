@@ -67,7 +67,10 @@ router.post('/process-text', verifyApiKey, async (req, res) => {
 
     res.json({
       success: true,
-      result: result
+      original: result.original,
+      processed: result.processed,
+      timestamp: result.timestamp,
+      model: result.model
     });
   } catch (error) {
     console.error('Text processing error:', error);

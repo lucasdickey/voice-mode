@@ -1,6 +1,7 @@
 package com.voicemode
 
 import android.accessibilityservice.AccessibilityService
+import android.content.ClipboardManager
 import android.graphics.PixelFormat
 import android.os.Build
 import android.util.Log
@@ -64,7 +65,7 @@ class VoiceModeAccessibilityService : AccessibilityService(), ViewModelStoreOwne
                         when (uiState) {
                             is VoiceInputState.Success -> {
                                 Log.d("VoiceMode", "Transcribed: ${uiState.text}")
-                                // TODO: Send transcribed text to active field
+                                injectTextToActiveField(uiState.text)
                             }
                             is VoiceInputState.Error -> {
                                 Log.e("VoiceMode", "Error: ${uiState.message}")
@@ -142,6 +143,54 @@ class VoiceModeAccessibilityService : AccessibilityService(), ViewModelStoreOwne
 
     private fun isEditable(node: AccessibilityNodeInfo?): Boolean {
         return node?.isEditable == true && node.isFocusable
+    }
+
+    /**
+     * Inject transcribed text into the currently focused text field
+     */
+    private fun injectTextToActiveField(text: String) {
+        try {
+            val root = rootInActiveWindow ?: return
+            val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
+
+            if (!isEditable(focusedNode)) {
+                Log.w("VoiceMode", "Focused node is not editable")
+                return
+            }
+
+            // Try ACTION_SET_TEXT first (most reliable)
+            if (focusedNode.isEnabled && focusedNode.isEditable) {
+                val action = AccessibilityNodeInfo.ACTION_SET_TEXT
+                val args = android.os.Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+                }
+
+                if (focusedNode.performAction(action, args)) {
+                    Log.d("VoiceMode", "Text injected successfully using ACTION_SET_TEXT")
+                    focusedNode.recycle()
+                    return
+                }
+            }
+
+            // Fallback: Use ACTION_PASTE with clipboard
+            val clipboardManager = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val clip = android.content.ClipData.newPlainText("voicemode_text", text)
+            clipboardManager.setPrimaryClip(clip)
+
+            // Move cursor to end
+            focusedNode.performAction(AccessibilityNodeInfo.ACTION_MOVE_CURSOR_TO_END)
+
+            // Paste text
+            if (focusedNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                Log.d("VoiceMode", "Text injected successfully using ACTION_PASTE")
+            } else {
+                Log.w("VoiceMode", "Failed to inject text using both methods")
+            }
+
+            focusedNode.recycle()
+        } catch (e: Exception) {
+            Log.e("VoiceMode", "Error injecting text", e)
+        }
     }
 
     override fun onInterrupt() {

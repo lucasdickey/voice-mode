@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./gradlew clean:*)"
+      "Bash(./gradlew clean:*)",
+      "Bash(aws cloudformation describe-stacks:*)",
+      "Bash(aws lambda update-function-code:*)"
     ],
     "deny": [],
     "ask": []

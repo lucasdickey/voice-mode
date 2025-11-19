@@ -65,17 +65,30 @@ class BedrockService {
   }
 
   /**
-   * Use Claude via Bedrock to process transcribed text
-   * For example: summarization, entity extraction, etc.
+   * Use Claude via Bedrock to process and enhance transcribed text
+   * This cleans up speech-to-text artifacts like filler words, grammar, proper nouns
    */
   async processText(text) {
     try {
-      const prompt = `Process this text: ${text}`;
+      const prompt = `You are an expert speech-to-text enhancement assistant. Your job is to clean up raw speech transcriptions.
+
+Given the following raw speech transcription, please:
+1. Remove filler words (um, uh, like, you know, sort of, kind of, etc.)
+2. Fix grammar and capitalization
+3. Capitalize proper nouns appropriately
+4. Add proper punctuation
+5. Improve sentence structure and flow
+6. Maintain the speaker's original meaning and tone
+
+Return ONLY the cleaned text, with no explanations or meta-commentary.
+
+Raw transcription:
+${text}`;
 
       const command = new InvokeModelCommand({
         modelId: this.modelId,
         body: JSON.stringify({
-          max_tokens: 1024,
+          max_tokens: 2048,
           messages: [
             {
               role: 'user',
@@ -86,9 +99,23 @@ class BedrockService {
       });
 
       const response = await this.client.send(command);
-      const responseText = JSON.parse(new TextDecoder().decode(response.body));
+      const responseBody = new TextDecoder().decode(response.body);
+      const parsedResponse = JSON.parse(responseBody);
 
-      return responseText;
+      // Extract the text content from Claude's response
+      const processedText = parsedResponse.content?.[0]?.text ||
+                           parsedResponse.text ||
+                           parsedResponse.result ||
+                           '';
+
+      console.log(`Text processing completed. Original length: ${text.length}, Processed length: ${processedText.length}`);
+
+      return {
+        original: text,
+        processed: processedText.trim(),
+        timestamp: new Date().toISOString(),
+        model: this.modelId
+      };
     } catch (error) {
       console.error('Error processing text with Bedrock:', error);
       throw new Error(`Text processing failed: ${error.message}`);

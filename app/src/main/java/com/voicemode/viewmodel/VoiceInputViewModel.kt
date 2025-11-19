@@ -61,9 +61,9 @@ class VoiceInputViewModel(
                 val result = bedrockService.transcribeAudio(audioFile)
                 when (result) {
                     is BedrockService.TranscriptionResult.Success -> {
-                        _transcribedText.value = result.text
-                        _uiState.value = VoiceInputState.Success(result.text)
                         Log.d(TAG, "Cloud transcription successful: ${result.text}")
+                        // Try to enhance the transcription with LLM
+                        enhanceTranscription(result.text)
                     }
                     is BedrockService.TranscriptionResult.Error -> {
                         Log.w(TAG, "Cloud transcription failed, falling back to ML Kit: ${result.message}")
@@ -74,6 +74,33 @@ class VoiceInputViewModel(
             } catch (e: Exception) {
                 Log.w(TAG, "Cloud transcription exception, falling back to ML Kit", e)
                 fallbackToMLKit()
+            }
+        }
+    }
+
+    private fun enhanceTranscription(rawText: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "Enhancing transcription with LLM")
+                val enhancementResult = bedrockService.enhanceText(rawText)
+                when (enhancementResult) {
+                    is BedrockService.EnhancementResult.Success -> {
+                        _transcribedText.value = enhancementResult.text
+                        _uiState.value = VoiceInputState.Success(enhancementResult.text)
+                        Log.d(TAG, "LLM enhancement successful: ${enhancementResult.text}")
+                    }
+                    is BedrockService.EnhancementResult.Error -> {
+                        Log.w(TAG, "LLM enhancement failed, using raw transcription: ${enhancementResult.message}")
+                        // Fall back to raw transcription if enhancement fails
+                        _transcribedText.value = rawText
+                        _uiState.value = VoiceInputState.Success(rawText)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "LLM enhancement exception, using raw transcription", e)
+                // Fall back to raw transcription if enhancement fails
+                _transcribedText.value = rawText
+                _uiState.value = VoiceInputState.Success(rawText)
             }
         }
     }
